@@ -9,6 +9,8 @@ nodes is a single matrix-vector product (see retrieval.py).
 """
 from __future__ import annotations
 
+import gc
+import os
 import threading
 from collections import OrderedDict
 from functools import lru_cache
@@ -23,7 +25,10 @@ from storage.vector_store import normalize_rows
 log = get_logger("embeddings")
 
 EMBED_CHAR_LIMIT = 2000  # unchanged from the original RAG
-EMBED_BATCH_SIZE = 32
+# Small batches + capped threads keep peak RAM low on free hosts (Streamlit Cloud ~2.7 GB);
+# a 10-page paper can produce 800+ chunks. Override with EMBED_BATCH_SIZE / EMBED_THREADS.
+EMBED_BATCH_SIZE = max(1, int(os.getenv("EMBED_BATCH_SIZE", "8") or 8))
+EMBED_THREADS = max(1, int(os.getenv("EMBED_THREADS", "2") or 2))
 
 ProgressFn = Optional[Callable[[float, str], None]]
 
@@ -50,7 +55,13 @@ def _model_cached(model_name: str, cache_dir: str):
     from fastembed import TextEmbedding  # heavy import: only when needed
 
     log.info("Loading embedding model %s", model_name)
-    return TextEmbedding(model_name=model_name, cache_dir=cache_dir)
+    # kSameAsRequested stops onnxruntime's memory arena from doubling on every growth
+    providers = [("CPUExecutionProvider", {"arena_extend_strategy": "kSameAsRequested"})]
+    try:
+        return TextEmbedding(model_name=model_name, cache_dir=cache_dir, threads=EMBED_THREADS, providers=providers)
+    except Exception as exc:  # option not supported by this fastembed/onnxruntime: fall back to defaults
+        log.warning("Low-memory embedding options unavailable (%s); using defaults", type(exc).__name__)
+        return TextEmbedding(model_name=model_name, cache_dir=cache_dir)
 
 
 def _model(model_name: str, cache_dir: str):
@@ -86,7 +97,7 @@ def embed_texts(texts: List[str], settings: Settings, model: str, kind: str = "d
         texts = [prefix + t for t in texts]
     try:
         engine = _model(model, str(settings.data_dir / "models"))
-        return [np.asarray(v, dtype=np.float32).tolist() for v in engine.embed(texts)]
+        return [np.asarray(v, dtype=np.float32).tolist() for v in engine.embed(texts, batch_size=EMBED_BATCH_SIZE)]
     except Exception as exc:
         log.exception("Embedding failed")
         raise EmbeddingError(model) from exc
@@ -134,6 +145,9 @@ def fill_missing_embeddings(index: DocumentIndex, settings: Settings, progress: 
         index.embeddings[batch] = matrix
         index.has_embedding[batch] = True
         done += len(batch)
+        del vectors, matrix
+        if done % (EMBED_BATCH_SIZE * 16) == 0:
+            gc.collect()
         if progress:
             progress(done / len(todo), f"Embedding {done}/{len(todo)} chunks")
     log.info("Embedding completed: %d nodes", done)
