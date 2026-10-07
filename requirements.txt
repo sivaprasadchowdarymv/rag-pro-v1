@@ -1,0 +1,12 @@
+# RAG∞ Pro - runtime dependencies (tested with Python 3.12)
+streamlit>=1.50,<2          # web UI (Markdown + LaTeX rendering)
+pymupdf>=1.24,<2            # PDF text, tables (find_tables), images
+pandas>=2.1,<4              # table extraction + browse view
+numpy>=1.26,<3              # embedding matrix / cosine similarity
+rapidfuzz>=3.6,<4           # fuzzy half of hybrid retrieval
+fastembed>=0.6,<1           # in-app embeddings (nomic-embed-text-v1.5, ONNX, CPU)
+groq>=1.0,<2                # Groq provider (tool calling)
+ollama>=0.6,<1              # Ollama Cloud + local Ollama provider
+httpx>=0.27,<1              # installed by groq/ollama; imported directly for error handling
+huggingface_hub>=0.24,<2     # persistent storage in a private HF dataset (also used by fastembed)
+python-dotenv>=1.0,<2       # reads the optional .env file for local runs

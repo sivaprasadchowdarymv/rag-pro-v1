@@ -1,0 +1,47 @@
+# --- Secrets & local config ---
+.env
+.streamlit/secrets.toml
+secrets.toml
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+
+# --- App data: uploaded-document indexes, figures, caches (can contain private data) ---
+data/
+.rag_cache/
+.cache/
+feedback.json
+
+# --- Uploaded / private documents & temporary figures ---
+*.pdf
+fig_*.png
+fig_*.jpg
+img_*.png
+
+# --- Model files (never commit; Ollama downloads them) ---
+*.gguf
+*.bin
+*.safetensors
+models/
+.ollama/
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.spyproject/
+.DS_Store
+Thumbs.db

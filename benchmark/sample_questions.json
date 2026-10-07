@@ -1,0 +1,10 @@
+[
+  {"question": "What is the peak output current?", "expected_pages": [2], "expected_answer_contains": ["2.2"]},
+  {"question": "What is the typical quiescent current?", "expected_pages": [2], "expected_answer_contains": ["5"]},
+  {"question": "What is the dropout voltage VDO?", "expected_pages": [2], "expected_answer_contains": ["2.0"]},
+  {"question": "Which equation gives the power dissipation PD?", "expected_pages": [3], "expected_answer_contains": ["PD"]},
+  {"question": "How is the junction temperature TJ calculated?", "expected_pages": [3], "expected_answer_contains": ["RthJA"]},
+  {"question": "What is the function of pin 2?", "expected_pages": [4], "expected_answer_contains": ["ground"]},
+  {"question": "What does Figure 2 show?", "expected_pages": [4], "expected_answer_contains": ["block diagram"]},
+  {"question": "What is the absolute maximum input voltage?", "expected_pages": [1], "expected_answer_contains": ["35"]}
+]
