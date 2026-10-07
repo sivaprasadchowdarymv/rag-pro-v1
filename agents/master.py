@@ -9,7 +9,6 @@ reasoning is never requested, stored or shown.
 """
 from __future__ import annotations
 
-from ops.guard import UNTRUSTED_NOTE, sanitize_evidence
 import json
 import time
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from agents.retrieval_stage import run_agents
 from config.settings import MAX_PREVIEW, Settings, get_logger
 from llm.model_router import ModelRouter
+from ops.guard import UNTRUSTED_NOTE, sanitize_evidence
 from llm.providers import LLMError
 from rag.agent import _ANSWER_FORMAT, NOT_FOUND
 from rag.models import AgentStep, DocumentIndex, Evidence, SourceRef

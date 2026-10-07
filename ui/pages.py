@@ -433,6 +433,11 @@ def insights_page() -> None:
                     st.markdown(f"{'✅' if ran else '⏭️'} **{name.replace('_', ' ').title()}**"
                                 + (f": {int(st_.get('results', 0))} candidates · {st_.get('latency_ms', 0):.1f} ms"
                                    if ran else " · skipped (not needed)"))
+                cl = (result.agent_stats or {}).get("concept_linker")
+                if cl:
+                    st.markdown(f"🔗 **Concept Linker**: {int(cl.get('concepts', 0))} concept(s) · "
+                                f"{int(cl.get('results', 0))} linked item(s) added · {int(cl.get('kept', 0))} kept · "
+                                f"~{int(cl.get('extra_tokens', 0))} extra tokens · {cl.get('latency_ms', 0):.1f} ms")
             if result.stage_latency:
                 widgets.section("Latency by stage")
                 st.dataframe(pd.DataFrame([{"stage": k, "ms": round(v, 1)} for k, v in result.stage_latency.items()]),

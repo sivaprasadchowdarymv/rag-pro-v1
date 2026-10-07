@@ -133,3 +133,47 @@ Rerun on your own PDFs from **Validate** to get real numbers.
 | Deployability | 13/15 |
 
 The remaining points need paid or heavier infrastructure (SSO, multi-replica, managed DB), which isn't justified at this scale.
+
+---
+
+# v4: Cross-modal concept / entity linking
+
+This is an incremental extension. It reuses the existing `Node`/`DocumentIndex` schema, `Evidence`, the specialist evidence builder, the reranker, fusion, the caches and workspace storage. It needs **no re-indexing, no new dependencies and no LLM calls by default**.
+
+```text
+Query → specialists (initial retrieval) → concept resolution (query → concept_ids, deterministic)
+      → selective cross-modal expansion (only the modalities the query asks for, ≤ CONCEPT_EXPAND_MAX)
+      → cross-encoder rerank → fusion (dedup + context budget) → LLM → verifier
+```
+
+| CHANGE | WHY | FILES MODIFIED | PERFORMANCE IMPACT | TEST RESULT |
+|---|---|---|---|---|
+| Concept graph per document: concepts from definitions (`Power Dissipation (PD)`, `Re (Reynolds number)`, `where VIN is …`), equation left-hand sides and numbered Figure/Table captions; mentions in text, table, row, pin, equation and figure with relation type and confidence | Link the same concept across modalities | `concepts/graph.py` (new) | Build 1.6–3.5 ms per document, once; cached in memory and in `documents/<doc_id>/concepts.json` (synced to HF) | 13 linking tests ✅ |
+| Homonyms are split by sense: an abbreviation with two expansions becomes two concepts, assigned by local context → section → page. Otherwise the mention is marked `ambiguous` and never expanded; an optional small-LLM chooser handles only those cases | Tell identical concepts apart from identical words | `concepts/graph.py`, `agents/rag_pro.py` | 0 LLM calls by default; with `CONCEPT_LLM_RESOLVE=true`, ≤ 20 tiny calls per document, cached | `test_same_word_*`, `test_ambiguous_*` ✅ |
+| OCR tolerance (`V0UT`→`VOUT`, `Reyno1ds`→`Reynolds`; part numbers untouched); hyphenated words (`Re-check`) are not symbols | Scanned or noisy PDFs | `concepts/graph.py` | – | `test_ocr_errors` ✅ |
+| Representations kept: equation raw / normalized / LaTeX (MathML = None, not extracted); table caption, headers, row label, cells, units; figure caption, context, vision text (OCR and image embedding = None: no OCR or vision-embedding model on the free tier); plus doc_id (version hash), page, section, node ref | The requirement asks to keep each modality's own form | `concepts/graph.py` | – | `test_representations_preserved` ✅ |
+| Selective expansion: formula → equation + definition; figure/table cues → those objects (+ referencing text when both are named); no cue → no expansion. Ambiguous or low-confidence links are skipped; tables capped at 1, others at 2 | Don't pull every linked modality; minimal tokens | `concepts/expand.py` (new), `agents/retrieval_stage.py` | +0.6–5 ms retrieval; golden set ≤ 46 extra tokens/query; sample datasheet: 0 extra tokens and identical P@5/R@5/MRR/NDCG | `test_selective_modalities`, `test_real_pipeline_integration` ✅ |
+| Security: candidates only from the graphs of the active, authorised indexes; a mention whose doc_id differs is dropped and counted | Linking must never bypass tenant or version isolation | `concepts/expand.py` | – | `test_unauthorised_*`, `test_multiple_versions_*` ✅ |
+| Observability: "Concept linker" stage in the activity log; Insights → Agent activity shows concepts, added/kept items, extra tokens and latency; `concepts` latency stage | Measure the cost of linking | `agents/rag_pro.py`, `ui/pages.py` | – | browser checked |
+| Evaluation: `python -m metrics.concept_eval` and golden doc `concepts/golden.py` | Required metrics | `metrics/concept_eval.py`, `concepts/golden.py` (new) | – | `test_evaluation_thresholds` ✅ |
+
+### Linking metrics (golden synthetic document)
+
+| Metric | Value |
+|---|---|
+| Entity-linking precision / recall | 1.00 / 1.00 |
+| Relation accuracy | 1.00 |
+| Cross-modal retrieval recall | 1.00 (5 queries) |
+| False-link rate | 0.00 |
+| Expansion latency (avg) | ~5 ms |
+| Additional tokens per query | ≤ 46 |
+| Additional cost per query | $0 (free plan; `COST_PER_1K_TOKENS` × tokens otherwise) |
+| LLM calls for linking | 0 |
+
+**Honest caveat:** the rules were tuned on this golden document, so these are best-case numbers. On the held-out sample datasheet, linking ran without errors and left retrieval quality and tokens unchanged. Add 10–20 questions from your own PDFs to `concepts/golden.py` to get real numbers.
+
+### Limitations
+* MathML isn't extracted; equations are read as text lines.
+* There is no OCR text or image embedding for figures.
+* Concepts are only created where the document **defines** them (acronym, symbol or numbered object), so an undefined term stays unlinked. This is deliberate: it keeps false links low.
+* Linking is per document. Concepts are not merged across different PDFs or versions, which is safer for permissions and version control.

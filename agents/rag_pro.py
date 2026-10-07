@@ -8,7 +8,7 @@ Every stage is timed. The trace records stages and tool ACTIONS only.
 """
 from __future__ import annotations
 
-from ops import answer_cache
+import re
 import time
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -20,6 +20,7 @@ from config.settings import Settings, get_logger
 from llm.model_router import ModelRouter
 from llm.providers import LLMError
 from metrics import rag_metrics
+from ops import answer_cache
 from rag.agent import NOT_FOUND
 from rag.models import AgentStep, DocumentIndex, QueryResult
 from rag.pipeline import normalize_answer
@@ -54,6 +55,23 @@ def _vision_describer(router: ModelRouter, settings: Settings):
         return text
 
     return describe
+
+
+def _concept_chooser(router: ModelRouter, settings: Settings):
+    """Small-LLM resolver for ambiguous abbreviations only (off by default; results cached in the graph)."""
+    if not settings.concept_llm_resolve or not router.has_role("fast"):
+        return None
+
+    def choose(context: str, senses: List[str]):
+        prompt = ("Which meaning does the abbreviation have in this text? Reply with the number only.\n"
+                  + "\n".join(f"{k + 1}. {s}" for k, s in enumerate(senses)) + f"\n\nText: {context}")
+        try:
+            res = router.chat("fast", [{"role": "user", "content": prompt}], max_tokens=5)
+            m = re.search(r"\d+", res.result.content or "")
+            return int(m.group()) - 1 if m else None
+        except LLMError:
+            return None
+    return choose
 
 
 def answer_pro(question: str, indexes: Sequence[DocumentIndex], settings: Settings, router: ModelRouter,
@@ -95,13 +113,17 @@ def answer_pro(question: str, indexes: Sequence[DocumentIndex], settings: Settin
             return hit
 
     # 2-4. Specialists → rerank → fusion
-    retrieval = run_retrieval(plan, indexes, settings, _vision_describer(router, settings))
+    retrieval = run_retrieval(plan, indexes, settings, _vision_describer(router, settings),
+                              _concept_chooser(router, settings))
     latency.update(retrieval.latency_ms)
     warnings += retrieval.warnings
     for name in plan.agents:
         st = retrieval.agent_stats.get(name, {})
         stage(f"{_AGENT_NAMES[name]}: {int(st.get('results', 0))} candidates"
               + (f" ({int(st['failures'])} failed)" if st.get("failures") else ""))
+    cl = retrieval.agent_stats.get("concept_linker")
+    if cl and cl.get("concepts"):
+        stage(f"Concept linker: {int(cl['concepts'])} concept(s) resolved, {int(cl['results'])} linked item(s) added")
     if retrieval.reranked:
         stage("Evidence reranked")
     fused = retrieval.fusion

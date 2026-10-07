@@ -86,4 +86,4 @@ def test_full_retrieval_stage(indexed):
     index, s = indexed
     out = run_retrieval(plan("What is the peak output current?"), [index], s)
     assert out.reranked and any("2.2" in e.excerpt for e in out.fusion.evidence[:3])
-    assert set(out.latency_ms) == {"retrieval", "rerank", "fusion"} and out.agent_stats["table_agent"]["calls"] == 1
+    assert {"retrieval", "rerank", "fusion"} <= set(out.latency_ms) and out.agent_stats["table_agent"]["calls"] == 1

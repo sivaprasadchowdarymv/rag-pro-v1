@@ -147,6 +147,12 @@ class Settings:
     answer_cache_ttl: int = 3600         # seconds; 0 disables the answer cache
     cost_per_1k_tokens: float = 0.0      # 0 for free plans; set for paid providers
 
+    # --- Cross-modal concept linking ------------------------------------------
+    concept_linking: bool = True
+    concept_expand_max: int = 4          # extra linked items per question (before rerank/fusion)
+    concept_min_conf: float = 0.6        # links below this are never expanded
+    concept_llm_resolve: bool = False    # small LLM only for ambiguous abbreviations (cached per doc)
+
     @property
     def parse_signature(self) -> Tuple:
         return (self.max_chunk_tokens, self.overlap_tokens, self.min_figure_px)
@@ -239,6 +245,10 @@ def load_settings() -> Settings:
         answer_cache_size=_env_int("ANSWER_CACHE_SIZE", 256, 0, 10000),
         answer_cache_ttl=_env_int("ANSWER_CACHE_TTL", 3600, 0, 86400 * 7),
         cost_per_1k_tokens=_env_float("COST_PER_1K_TOKENS", 0.0, 0.0, 100.0),
+        concept_linking=_env_bool("CONCEPT_LINKING", True),
+        concept_expand_max=_env_int("CONCEPT_EXPAND_MAX", 4, 0, 10),
+        concept_min_conf=_env_float("CONCEPT_MIN_CONF", 0.6, 0.0, 1.0),
+        concept_llm_resolve=_env_bool("CONCEPT_LLM_RESOLVE", False),
     )
 
 

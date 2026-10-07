@@ -117,6 +117,8 @@ python -m pytest tests -q
 * **Equation extraction reads equations as text lines** (e.g. `PD = (VIN - VOUT) x IOUT`). Typeset math that a PDF stores as graphics isn't recovered.
 * **The included benchmark report uses a synthetic datasheet and stand-in models.** Rerun it on your own PDFs.
 
+**v4 cross-modal concept linking:** text ↔ table ↔ figure ↔ equation mentions share a `concept_id`; only the modalities a question asks for are added (see PRODUCTION.md).
+
 **v3 production guards:** prompt-injection defence, rate limiting, verified-answer cache, system telemetry (Insights → System), NDCG, Docker. See [PRODUCTION.md](PRODUCTION.md).
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [DEPLOYMENT.md](DEPLOYMENT.md) and [ARCHITECTURE_AUDIT.md](ARCHITECTURE_AUDIT.md).

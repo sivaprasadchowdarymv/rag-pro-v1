@@ -11,6 +11,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from agents.orchestrator import Plan
 from agents.specialists import SPECIALISTS, QueryContext
+from concepts.expand import expand
+from concepts.graph import get_graph
 from config.settings import Settings, get_logger
 from rag.models import DocumentIndex, Evidence
 from retrieval.evidence_fusion import FusionResult, fuse, merge, rrf
@@ -52,10 +54,30 @@ def run_agents(agents: Sequence[str], query: str, indexes: Sequence[DocumentInde
 
 
 def run_retrieval(plan: Plan, indexes: Sequence[DocumentIndex], settings: Settings,
-                  describe: Optional[Callable] = None) -> RetrievalOutcome:
+                  describe: Optional[Callable] = None, chooser: Optional[Callable] = None) -> RetrievalOutcome:
     t0 = time.perf_counter()
     groups, stats, ctx = run_agents(plan.agents, plan.retrieval_query, indexes, settings, describe)
     t_retrieval = (time.perf_counter() - t0) * 1000
+
+    # Concept/entity resolution -> selective cross-modal expansion (deterministic, cached graph).
+    t_concepts = 0.0
+    if getattr(settings, "concept_linking", False) and indexes:
+        try:
+            if chooser is not None:
+                for ix in indexes:
+                    get_graph(ix, chooser)
+            existing = {e.key for g in groups for e in g}
+            linked, cstats = expand(plan.retrieval_query, plan.intents, indexes, existing,
+                                    settings.concept_expand_max, settings.concept_min_conf,
+                                    settings.max_chars_per_chunk)
+            t_concepts = cstats["latency_ms"]
+            if linked:
+                groups.append(linked)
+            stats["concept_linker"] = {"calls": 1, "results": cstats["added"], "failures": 0,
+                                       "latency_ms": t_concepts, "concepts": cstats["concepts"]}
+        except Exception:  # linking is an enhancement: never break retrieval
+            log.exception("concept linking failed")
+            stats["concept_linker"] = {"calls": 1, "results": 0, "failures": 1, "latency_ms": 0.0}
 
     # Rerank the best candidates by RRF with the cross-encoder.
     pool = merge(groups)
@@ -70,6 +92,11 @@ def run_retrieval(plan: Plan, indexes: Sequence[DocumentIndex], settings: Settin
     fused = fuse(groups, budget_items, settings.max_context_chars, rerank_scores)
     t_fusion = (time.perf_counter() - t1) * 1000
 
+    if "concept_linker" in stats:  # what actually reached the LLM context because of linking
+        kept = [e for e in fused.evidence if set(e.ranks) == {"concept"}]
+        stats["concept_linker"].update(kept=len(kept), extra_tokens=round(sum(len(e.content) for e in kept) / 4))
     warnings = list(dict.fromkeys(ctx.warnings + ([warn] if warn else [])))
-    return RetrievalOutcome(fused, stats, {"retrieval": t_retrieval, "rerank": t_rerank, "fusion": t_fusion},
-                            warnings, reranked=bool(scores))
+    lat = {"retrieval": t_retrieval, "rerank": t_rerank, "fusion": t_fusion}
+    if t_concepts:
+        lat["concepts"] = t_concepts
+    return RetrievalOutcome(fused, stats, lat, warnings, reranked=bool(scores))

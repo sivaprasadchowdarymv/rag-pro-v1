@@ -97,6 +97,8 @@ def _isolated_index_cache():
     answer_cache._ANSWERS = None
     LIMITER._hits.clear()
     telemetry.reset()
+    from concepts.graph import clear_cache
+    clear_cache()
     yield
     pipeline._registry.clear()
 
