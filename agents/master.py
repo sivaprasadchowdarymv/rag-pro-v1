@@ -9,6 +9,7 @@ reasoning is never requested, stored or shown.
 """
 from __future__ import annotations
 
+from ops.guard import UNTRUSTED_NOTE, sanitize_evidence
 import json
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ class EvidenceRegistry:
     """Gives every evidence item a stable [REF-n: TYPE pX] label."""
 
     def __init__(self) -> None:
+        self.injection_lines = 0
         self.refs: List[SourceRef] = []
         self.evidence: Dict[int, Evidence] = {}
         self._by_key: Dict[str, SourceRef] = {}
@@ -61,7 +63,9 @@ class EvidenceRegistry:
         for ev in items:
             ref = self.add(ev)
             extra = ", ".join(x for x in (ev.doc_name, ev.item_id) if x)
-            block = f"{ref.label} ({extra}) section: {ev.section}\n{ev.content.strip()}"
+            content, hits = sanitize_evidence(ev.content.strip())
+            self.injection_lines += hits
+            block = f"{ref.label} ({extra}) section: {ev.section}\n{content}"
             if out and used + len(block) > budget:
                 break
             out.append(block[: max(200, budget - used)])
@@ -140,7 +144,8 @@ def _system_prompt(use_tools: bool, preferences: str) -> str:
     return ("You are an expert electronics engineer answering questions about component datasheets and "
             "technical documents, using ONLY the numbered evidence provided.\n\n" + tools + _ANSWER_FORMAT
             + "\n- If evidence comes from several documents, say which document each fact comes from."
-            + "\n- If the evidence is insufficient for part of the question, say so explicitly." + prefs)
+            + "\n- If the evidence is insufficient for part of the question, say so explicitly."
+            + "\n- " + UNTRUSTED_NOTE + prefs)
 
 
 def run_master(question: str, evidence_text: str, use_tools: bool, router: ModelRouter, settings: Settings,

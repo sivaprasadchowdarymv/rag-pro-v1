@@ -140,6 +140,13 @@ class Settings:
     enable_feedback: bool
     log_level: str
 
+    # --- Production guards (rate limit, caches, cost) -----------------------
+    rate_limit_per_min: int = 8          # per browser session
+    global_rate_limit_per_min: int = 25  # whole server (Groq free ~30 RPM)
+    answer_cache_size: int = 256
+    answer_cache_ttl: int = 3600         # seconds; 0 disables the answer cache
+    cost_per_1k_tokens: float = 0.0      # 0 for free plans; set for paid providers
+
     @property
     def parse_signature(self) -> Tuple:
         return (self.max_chunk_tokens, self.overlap_tokens, self.min_figure_px)
@@ -227,6 +234,11 @@ def load_settings() -> Settings:
         data_dir=_writable_dir(Path(_env_str("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()),
         enable_feedback=_env_bool("ENABLE_FEEDBACK", False),
         log_level=_env_str("LOG_LEVEL", "INFO").upper(),
+        rate_limit_per_min=_env_int("RATE_LIMIT_PER_MIN", 8, 0, 1000),
+        global_rate_limit_per_min=_env_int("GLOBAL_RATE_LIMIT_PER_MIN", 25, 0, 10000),
+        answer_cache_size=_env_int("ANSWER_CACHE_SIZE", 256, 0, 10000),
+        answer_cache_ttl=_env_int("ANSWER_CACHE_TTL", 3600, 0, 86400 * 7),
+        cost_per_1k_tokens=_env_float("COST_PER_1K_TOKENS", 0.0, 0.0, 100.0),
     )
 
 

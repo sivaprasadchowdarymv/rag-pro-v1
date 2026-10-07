@@ -7,7 +7,9 @@ from metrics.benchmark import retrieval_scores, run, to_markdown
 
 def test_retrieval_scores():
     s = retrieval_scores([3, 2, 2, 1], [2], k=3)
+    ndcg = s.pop("ndcg@k")
     assert s == {"precision@k": 2 / 3, "recall@k": 1.0, "hit": 1.0, "mrr": 0.5}
+    assert abs(ndcg - 1 / 1.584962500721156) < 1e-9
     assert retrieval_scores([1], [4], 5)["mrr"] == 0.0
 
 

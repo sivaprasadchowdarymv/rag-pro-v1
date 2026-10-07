@@ -10,6 +10,7 @@ nodes is a single matrix-vector product (see retrieval.py).
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Callable, List, Optional
 
@@ -91,10 +92,27 @@ def embed_texts(texts: List[str], settings: Settings, model: str, kind: str = "d
         raise EmbeddingError(model) from exc
 
 
+_QVEC: "OrderedDict[tuple, np.ndarray]" = OrderedDict()
+_QVEC_MAX = 512
+QVEC_STATS = {"hits": 0, "misses": 0}
+
+
 def embed_query(query: str, settings: Settings, model: Optional[str] = None) -> np.ndarray:
     model = model or settings.embed_model
+    key = (model, query[:EMBED_CHAR_LIMIT])
+    cached = _QVEC.get(key)
+    if cached is not None:
+        _QVEC.move_to_end(key)
+        QVEC_STATS["hits"] += 1
+        return cached
+    QVEC_STATS["misses"] += 1
     vec = embed_texts([query[:EMBED_CHAR_LIMIT]], settings, model, kind="query")[0]
-    return normalize_rows(np.asarray([vec], dtype=np.float32))[0]
+    out = normalize_rows(np.asarray([vec], dtype=np.float32))[0]
+    out.setflags(write=False)
+    _QVEC[key] = out
+    while len(_QVEC) > _QVEC_MAX:
+        _QVEC.popitem(last=False)
+    return out
 
 
 def fill_missing_embeddings(index: DocumentIndex, settings: Settings, progress: ProgressFn = None) -> int:

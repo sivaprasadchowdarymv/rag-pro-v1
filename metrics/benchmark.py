@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+import math
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -33,8 +34,15 @@ def retrieval_scores(ranked_pages: Sequence[int], expected: Sequence[int], k: in
     top = list(ranked_pages)[:k]
     hits = [p for p in top if p in exp]
     rr = next((1.0 / (i + 1) for i, p in enumerate(ranked_pages) if p in exp), 0.0)
+    # NDCG@K with binary relevance; a page counts once (duplicates are not rewarded)
+    seen, dcg = set(), 0.0
+    for i, pg in enumerate(top):
+        if pg in exp and pg not in seen:
+            seen.add(pg)
+            dcg += 1.0 / math.log2(i + 2)
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(min(len(exp), k)))
     return {"precision@k": len(hits) / max(len(top), 1), "recall@k": len(set(hits)) / max(len(exp), 1),
-            "hit": 1.0 if hits else 0.0, "mrr": rr}
+            "hit": 1.0 if hits else 0.0, "mrr": rr, "ndcg@k": dcg / idcg if idcg else 0.0}
 
 
 def _legacy_pages(q: str, index, settings: Settings) -> List[int]:
@@ -76,7 +84,7 @@ def run(pdf_bytes: bytes, filename: str, questions: List[Dict], settings: Settin
         vals = [r[name][key] for r in rows if key in r[name]]
         return round(statistics.mean(vals), 3) if vals else None
 
-    keys = ["precision@k", "recall@k", "hit", "mrr", "retrieval_ms", "correct", "grounded",
+    keys = ["precision@k", "recall@k", "hit", "mrr", "ndcg@k", "retrieval_ms", "correct", "grounded",
             "citation_precision", "llm_calls", "tokens", "answer_s"]
     summary = {name: {kk: mean(name, kk) for kk in keys} for name in ("legacy", "pro")}
     return {"document": filename, "k": k, "questions": len(rows), "summary": summary, "rows": rows,
@@ -89,7 +97,7 @@ def to_markdown(rep: Dict, note: str = "") -> str:
     if note:
         lines += [f"> {note}", ""]
     lines += ["| Metric | Legacy | RAG∞ Pro |", "|---|---|---|"]
-    names = {"precision@k": "Precision@K", "recall@k": "Recall@K", "hit": "Hit rate", "mrr": "MRR",
+    names = {"precision@k": "Precision@K", "recall@k": "Recall@K", "hit": "Hit rate", "mrr": "MRR", "ndcg@k": "NDCG@K",
              "retrieval_ms": "Retrieval latency (ms)", "correct": "Answer correctness", "grounded": "Grounded",
              "citation_precision": "Citation precision", "llm_calls": "LLM calls / question",
              "tokens": "Tokens / question", "answer_s": "Answer latency (s)"}

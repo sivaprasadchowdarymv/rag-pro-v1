@@ -15,6 +15,7 @@ Validate the system on YOUR documents.
 """
 from __future__ import annotations
 
+from metrics.benchmark import retrieval_scores
 import re
 import statistics
 import time
@@ -102,6 +103,7 @@ def evaluate(questions: Sequence[Dict], indexes: Sequence[DocumentIndex], settin
         rank = next((k + 1 for k, p in enumerate(found) if p in pages), None)
         row = {"question": q["question"], "expected": ", ".join(map(str, q.get("expected_answer_contains", []))),
                "retrieval_hit": rank is not None, "mrr": round(1 / rank, 3) if rank else 0.0,
+               "ndcg@5": round(retrieval_scores(found, sorted(pages), 5)["ndcg@k"], 3),
                "retrieval_ms": round((time.perf_counter() - t0) * 1000, 1)}
         if with_answers and router is not None:
             r = answer_pro(q["question"], indexes, settings, router)
@@ -121,6 +123,7 @@ def evaluate(questions: Sequence[Dict], indexes: Sequence[DocumentIndex], settin
 
     summary = {"questions": len(rows), "retrieval_hit_rate": rate("retrieval_hit"),
                "mrr": round(statistics.mean(r["mrr"] for r in rows), 3) if rows else None,
+               "ndcg@5": round(statistics.mean(r["ndcg@5"] for r in rows), 3) if rows else None,
                "answer_accuracy": rate("answer_correct"), "cited_correct_page": rate("cited_correct_page"),
                "verified_rate": rate("verdict")}
     return {"summary": summary, "rows": rows}
@@ -131,7 +134,7 @@ def to_markdown(report: Dict, title: str = "Validation report") -> str:
     pct = lambda v: "-" if v is None else f"{v * 100:.0f}%"  # noqa: E731
     lines = [f"# {title}", "", f"{s['questions']} questions", "",
              "| Metric | Value |", "|---|---|",
-             f"| Retrieval hit rate | {pct(s['retrieval_hit_rate'])} |", f"| MRR | {s['mrr']} |",
+             f"| Retrieval hit rate | {pct(s['retrieval_hit_rate'])} |", f"| MRR | {s['mrr']} |", f"| NDCG@5 | {s['ndcg@5']} |",
              f"| Answer accuracy | {pct(s['answer_accuracy'])} |",
              f"| Cites the correct page | {pct(s['cited_correct_page'])} |",
              f"| Verified | {pct(s['verified_rate'])} |", "", "| Question | Hit | Correct | Verdict |", "|---|---|---|---|"]

@@ -90,7 +90,13 @@ def _isolated_index_cache():
     """Each test starts with an empty in-memory index cache (it is per process in the app)."""
     from rag import pipeline
 
+    from ops import answer_cache, telemetry
+    from ops.guard import LIMITER
+
     pipeline._registry.clear()
+    answer_cache._ANSWERS = None
+    LIMITER._hits.clear()
+    telemetry.reset()
     yield
     pipeline._registry.clear()
 

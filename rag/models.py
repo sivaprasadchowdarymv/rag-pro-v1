@@ -210,4 +210,5 @@ class QueryResult:
     agent_stats: Dict[str, Dict[str, float]] = field(default_factory=dict)
     conflicts: List[str] = field(default_factory=list)
     regenerated: bool = False
+    cached: bool = False
     question: str = ""

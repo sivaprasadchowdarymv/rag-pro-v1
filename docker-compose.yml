@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    env_file: .env          # GROQ_API_KEY, HF_TOKEN, ... (never commit .env)
+    ports:
+      - "127.0.0.1:8501:8501"   # local only; put a reverse proxy in front for public HTTPS
+    volumes:
+      - app_data:/app/data
+    restart: unless-stopped
+    logging:
+      options: { max-size: "10m", max-file: "3" }
+volumes:
+  app_data:

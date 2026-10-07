@@ -8,6 +8,7 @@ Every stage is timed. The trace records stages and tool ACTIONS only.
 """
 from __future__ import annotations
 
+from ops import answer_cache
 import time
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -77,6 +78,21 @@ def answer_pro(question: str, indexes: Sequence[DocumentIndex], settings: Settin
     plan = make_plan(question, previous_question, len(indexes), settings.agent_mode)
     latency["router"] = plan.latency_ms
     stage(f"Query classified: {', '.join(plan.intents)}" + (" (follow-up)" if plan.is_follow_up else ""))
+
+    cache = answer_cache.answers(settings.answer_cache_size, settings.answer_cache_ttl)
+    ckey = None
+    if not plan.is_follow_up:
+        ckey = answer_cache.answer_key(
+            question, [i.doc_id for i in indexes], [getattr(i, "embed_model", "") for i in indexes],
+            settings.agent_mode, settings.rerank, settings.max_context_chars, settings.llm_providers,
+            settings.master_model, preferences)
+        hit = cache.get(ckey)
+        if hit is not None:
+            hit.cached, hit.steps = True, [AgentStep("stage", "Answered from cache (verified earlier)")]
+            hit.latency, hit.llm_calls, hit.tokens = round(time.perf_counter() - t_start, 3), 0, 0
+            if on_step:
+                on_step(hit.steps[0])
+            return hit
 
     # 2-4. Specialists → rerank → fusion
     retrieval = run_retrieval(plan, indexes, settings, _vision_describer(router, settings))
@@ -170,9 +186,16 @@ def answer_pro(question: str, indexes: Sequence[DocumentIndex], settings: Settin
     metrics = {} if not_found else rag_metrics.compute(question, answer, sources, report.as_dict(), settings,
                                                         {k: v for k, v in latency.items() if k != "total"},
                                                         tokens, calls)
-    return QueryResult(
+    if registry.injection_lines:
+        warnings.append(f"{registry.injection_lines} instruction-like line(s) in the documents were treated as data "
+                        "(prompt-injection guard).")
+    result = QueryResult(
         kind="not_found" if not_found else "answer", answer=answer, sources=sources, metrics=metrics,
         latency=round(latency["total"] / 1000, 2), warnings=list(dict.fromkeys(warnings)),
         used_llm=outcome is not None and bool(outcome.answer), steps=steps, llm_calls=calls, tokens=tokens,
         provider=provider, model=model, stage_latency={k: round(v, 1) for k, v in latency.items()},
         verification=report.as_dict(), regenerated=regenerated, **base)
+    if (ckey and result.kind == "answer" and result.used_llm and report.verdict in ("verified", "partial")
+            and not report.invalid_citations):
+        cache.set(ckey, result)
+    return result

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import statistics
 import time
 from typing import Dict, List
@@ -10,6 +11,8 @@ import pandas as pd
 import streamlit as st
 
 from agents.rag_pro import answer_pro
+from ops import telemetry
+from ops.guard import LIMITER
 from chat.conversations import result_from_dict
 from learning.dpo_dataset import build_pairs
 from learning.feedback import REASONS
@@ -31,7 +34,33 @@ GENERIC_SUGGESTIONS = ["Summarize this document", "What are the absolute maximum
 # Shared helpers
 # =============================================================================
 def ask(question: str, conv, on_step) -> QueryResult:
-    s, indexes = state.settings(), state.active_indexes()
+    s = state.settings()
+    session_key = st.session_state.setdefault("_rate_key", secrets.token_hex(8))
+    wait = LIMITER.allow(session_key, s.rate_limit_per_min, s.global_rate_limit_per_min)
+    if wait:
+        telemetry.record(s.data_dir, question=question, latency_s=0, tokens=0, llm_calls=0, provider="",
+                         cached=False, error=False, kind="rate_limited", rate_limited=True)
+        return QueryResult(kind="not_found", answer=f"⏳ Too many questions right now. Please wait about "
+                                                    f"{int(wait) + 1} seconds and ask again.", question=question)
+    t0, error = time.perf_counter(), False
+    try:
+        result = _ask(question, conv, on_step, s)
+    except Exception:
+        error = True
+        raise
+    finally:
+        r = locals().get("result")
+        telemetry.record(s.data_dir, question=question, latency_s=time.perf_counter() - t0,
+                         tokens=getattr(r, "tokens", 0) or 0, llm_calls=getattr(r, "llm_calls", 0) or 0,
+                         provider=getattr(r, "provider", "") or "", cached=bool(getattr(r, "cached", False)),
+                         error=error or (r is not None and r.used_llm is False and r.kind == "answer"
+                                         and any("without an AI answer" in w for w in r.warnings)),
+                         kind=getattr(r, "kind", "error"), cost_per_1k=s.cost_per_1k_tokens)
+    return result
+
+
+def _ask(question: str, conv, on_step, s) -> QueryResult:
+    indexes = state.active_indexes()
     if s.pipeline_mode == "legacy":
         result = answer_query(question, indexes[0], s, on_step=on_step)
         if len(indexes) > 1:
@@ -308,7 +337,7 @@ def validate_page() -> None:
     rep = st.session_state.get("val_report")
     if rep:
         s = rep["summary"]
-        widgets.metric_cards({"Retrieval hit rate": s["retrieval_hit_rate"], "MRR": s["mrr"],
+        widgets.metric_cards({"Retrieval hit rate": s["retrieval_hit_rate"], "MRR": s["mrr"], "NDCG@5": s.get("ndcg@5"),
                               "Answer accuracy": s["answer_accuracy"], "Cites correct page": s["cited_correct_page"],
                               "Verified": s["verified_rate"]})
         view = pd.DataFrame([{"question": r["question"], "expected": r["expected"],
@@ -327,9 +356,30 @@ def _all_results() -> List[Dict]:
             for m in c.messages if m.role == "assistant" and m.result and m.result.get("metrics")]
 
 
+def _system_tab() -> None:
+    sm = telemetry.summary()
+    if not sm["requests"]:
+        st.info("System metrics (latency percentiles, tokens, cost, cache hits, errors) appear after a few questions.")
+        return
+    fmt = lambda v, f: "—" if v is None else f.format(v)  # noqa: E731
+    c = st.columns(4)
+    c[0].metric("P50 latency", fmt(sm["p50_latency_s"], "{:.2f} s"))
+    c[1].metric("P95 latency", fmt(sm["p95_latency_s"], "{:.2f} s"))
+    c[2].metric("Cache hit rate", fmt(sm["cache_hit_rate"], "{:.0%}"))
+    c[3].metric("Error rate", fmt(sm["error_rate"], "{:.0%}"))
+    c = st.columns(4)
+    c[0].metric("Requests", sm["requests"])
+    c[1].metric("Avg tokens", fmt(sm["avg_tokens"], "{:.0f}"))
+    c[2].metric("Cost / request", fmt(sm["cost_per_request"], "${:.4f}"))
+    c[3].metric("Rate-limited", sm["rate_limited"])
+    st.caption("Since the server started. Full log: data/telemetry/requests.jsonl (no question text stored).")
+
+
 def insights_page() -> None:
     st.title("📊 Insights")
-    tab1, tab2, tab3 = st.tabs(["Quality", "Agent activity", "Feedback"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Quality", "Agent activity", "Feedback", "System"])
+    with tab4:
+        _system_tab()
     s = state.settings()
     results = _all_results()
     fb = state.feedback().stats()
